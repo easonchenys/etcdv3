@@ -5,11 +5,21 @@ use crate::rpc::pb::etcdserverpb::lease_client::LeaseClient as PbLeaseClient;
 use crate::rpc::pb::etcdserverpb::{
     LeaseGrantRequest as PbLeaseGrantRequest,
     LeaseGrantResponse as PbLeaseGrantResponse,
-};
+    LeaseRevokeRequest as PbLeaseRevokeRequest,
+    LeaseRevokeResponse as PbLeaseRevokeResponse,
+    LeaseTimeToLiveRequest as PbLeaseTimeToLiveRequest,
+    LeaseTimeToLiveResponse as PbLeaseTimeToLiveResponse,
+    LeaseKeepAliveRequest as PbLeaseKeepAliveRequest,
+    LeaseKeepAliveResponse as PbLeaseKeepAliveResponse,
+    LeaseLeasesRequest as PbLeaseLeasesRequest,
+    LeaseLeasesResponse as PbLeaseLeasesResponse,
+    LeaseStatus};
 
-use crate::rpc::{get_prefix, KeyValue, ResponseHeader};
+use crate::rpc::ResponseHeader;
 use tonic::transport::Channel;
 use tonic::{Interceptor, IntoRequest, Request};
+use tokio::sync::mpsc::channel;
+use crate::Error;
 
 /// Client for lease operations.
 #[repr(transparent)]
@@ -69,21 +79,36 @@ impl LeaseClient {
         &mut self,
         id: i64,
         options: Option<LeaseKeepAliveOptions>,
-    ) -> Result<LeaseKeepAliveResponse> {
-        let resp = self
-            .inner
-            .lease_keep_alive(options.unwrap_or_default())
-            .await?
-            .into_inner();
-        Ok(LeaseKeepAliveResponse::new(resp))
+    ) -> Result<(i64, i64)> {
+        let (mut sender, receiver) = channel::<PbLeaseKeepAliveRequest>(100);
+        sender
+            .send(options.unwrap_or_default().with_id(id).into())
+            .await
+            .map_err(|e| Error::WatchError(e.to_string()))?;
+        // TODO: check error
+        /*
+                let mut stream = self.inner.lease_keep_alive(receiver).await?.into_inner();
+
+                let watch_id = match stream.message().await? {
+                    Some(resp) => {
+                        resp.id
+                    }
+                    None => {
+                        return Err(Error::WatchError("failed to create watch".to_string()));
+                    }
+                };
+
+                Ok((Watcher::new(id, sender), WatchStream::new(stream)))
+                */
+        Ok((1, 2))
     }
 
     ///lease_time_to_live retrieves lease information.
     pub async fn lease_time_to_live(
-       &mut self,
-       id: i64,
-       keys: bool,
-       options: Option<LeaseTimeToLiveOptions>,
+        &mut self,
+        id: i64,
+        keys: bool,
+        options: Option<LeaseTimeToLiveOptions>,
     ) -> Result<LeaseTimeToLiveResponse> {
         let resp = self
             .inner
@@ -93,18 +118,18 @@ impl LeaseClient {
         Ok(LeaseTimeToLiveResponse::new(resp))
     }
 
-     /// lease_leases lists all existing leases.
+    /// lease_leases lists all existing leases.
     pub async fn lease_leases(
-       &mut self,
-       options: Option<LeaseLeasesOptions>,
+        &mut self,
+        options: Option<LeaseLeasesOptions>,
     ) -> Result<LeaseLeasesResponse> {
-         let resp = self
-             .inner
-             .lease_time_to_live(options.unwrap_or_default())
-             .await?
-             .into_inner();
-         Ok(LeaseLeasesResponse::new(resp))
-     }
+        let resp = self
+            .inner
+            .lease_leases(options.unwrap_or_default())
+            .await?
+            .into_inner();
+        Ok(LeaseLeasesResponse::new(resp))
+    }
 }
 
 /// Options for `leaseGrant` operation.
@@ -187,4 +212,277 @@ impl LeaseGrantResponse {
     /// error message if return error.
     #[inline]
     pub fn error(&self) -> &[u8] { self.0.error.as_ref() }
+}
+
+/// Options for `leaseRevoke` operation.
+#[derive(Debug, Default, Clone)]
+#[repr(transparent)]
+pub struct LeaseRevokeOptions(PbLeaseRevokeRequest);
+
+impl LeaseRevokeOptions {
+    /// Set id
+    fn with_id(mut self, id: i64) -> Self {
+        self.0.id = id;
+        self
+    }
+
+    /// Creates a `LeaseRevokeOptions`.
+    #[inline]
+    pub const fn new() -> Self {
+        Self(PbLeaseRevokeRequest {
+            id: 0,
+        })
+    }
+}
+
+impl From<LeaseRevokeOptions> for PbLeaseRevokeRequest {
+    #[inline]
+    fn from(options: LeaseRevokeOptions) -> Self {
+        options.0
+    }
+}
+
+impl IntoRequest<PbLeaseRevokeRequest> for LeaseRevokeOptions {
+    #[inline]
+    fn into_request(self) -> Request<PbLeaseRevokeRequest> {
+        Request::new(self.into())
+    }
+}
+
+/// Response for `leaseRevoke` operation.
+#[derive(Debug, Clone)]
+#[repr(transparent)]
+pub struct LeaseRevokeResponse(PbLeaseRevokeResponse);
+
+impl LeaseRevokeResponse {
+    /// Create a new `LeaseRevokeResponse` from pb lease revoke response.
+    #[inline]
+    const fn new(resp: PbLeaseRevokeResponse) -> Self {
+        Self(resp)
+    }
+
+    /// Get response header.
+    #[inline]
+    pub fn header(&self) -> Option<&ResponseHeader> {
+        self.0.header.as_ref().map(From::from)
+    }
+
+    /// Takes the header out of the response, leaving a [`None`] in its place.
+    #[inline]
+    pub fn take_header(&mut self) -> Option<ResponseHeader> {
+        self.0.header.take().map(ResponseHeader::new)
+    }
+}
+
+// TODO: PbLeaseKeepAliveRequest is stream
+/// Options for `leaseKeepAlive` operation.
+#[derive(Debug, Default, Clone)]
+#[repr(transparent)]
+pub struct LeaseKeepAliveOptions(PbLeaseKeepAliveRequest);
+
+impl LeaseKeepAliveOptions {
+    /// Set id
+    fn with_id(mut self, id: i64) -> Self {
+        self.0.id = id;
+        self
+    }
+
+    /// Creates a `LeaseKeepAliveOptions`.
+    #[inline]
+    pub const fn new() -> Self {
+        Self(PbLeaseKeepAliveRequest {
+            id: 0,
+        })
+    }
+}
+
+impl From<LeaseKeepAliveOptions> for PbLeaseKeepAliveRequest {
+    #[inline]
+    fn from(options: LeaseKeepAliveOptions) -> Self {
+        options.0
+    }
+}
+
+impl IntoRequest<PbLeaseKeepAliveRequest> for LeaseKeepAliveOptions {
+    #[inline]
+    fn into_request(self) -> Request<PbLeaseKeepAliveRequest> {
+        Request::new(self.into())
+    }
+}
+
+/// Response for `leaseKeepAlive` operation.
+#[derive(Debug, Clone)]
+#[repr(transparent)]
+pub struct LeaseKeepAliveResponse(PbLeaseKeepAliveResponse);
+
+impl LeaseKeepAliveResponse {
+    /// Create a new `LeaseKeepAliveResponse` from pb lease KeepAlive response.
+    #[inline]
+    const fn new(resp: PbLeaseKeepAliveResponse) -> Self {
+        Self(resp)
+    }
+
+    /// Get response header.
+    #[inline]
+    pub fn header(&self) -> Option<&ResponseHeader> {
+        self.0.header.as_ref().map(From::from)
+    }
+
+    /// Takes the header out of the response, leaving a [`None`] in its place.
+    #[inline]
+    pub fn take_header(&mut self) -> Option<ResponseHeader> {
+        self.0.header.take().map(ResponseHeader::new)
+    }
+
+    /// TTL is the new time-to-live for the lease.
+    #[inline]
+    pub const fn ttl(&self) -> i64 {
+        self.0.ttl
+    }
+
+    /// ID is the lease ID for the keep alive request.
+    #[inline]
+    pub const fn id(&self) -> i64 { self.0.id }
+}
+
+/// Options for `leaseTimeToLive` operation.
+#[derive(Debug, Default, Clone)]
+#[repr(transparent)]
+pub struct LeaseTimeToLiveOptions(PbLeaseTimeToLiveRequest);
+
+impl LeaseTimeToLiveOptions {
+    /// ID is the lease ID for the lease.
+    fn with_id(mut self, id: i64) -> Self {
+        self.0.id = id;
+        self
+    }
+
+    /// keys is true to query all the keys attached to this lease.
+    fn with_keys(mut self, keys: bool) -> Self {
+        self.0.keys = keys;
+        self
+    }
+
+    /// Creates a `LeaseTimeToLiveOptions`.
+    #[inline]
+    pub const fn new() -> Self {
+        Self(PbLeaseTimeToLiveRequest {
+            id: 0,
+            keys: false,
+        })
+    }
+}
+
+impl From<LeaseTimeToLiveOptions> for PbLeaseTimeToLiveRequest {
+    #[inline]
+    fn from(options: LeaseTimeToLiveOptions) -> Self {
+        options.0
+    }
+}
+
+impl IntoRequest<PbLeaseTimeToLiveRequest> for LeaseTimeToLiveOptions {
+    #[inline]
+    fn into_request(self) -> Request<PbLeaseTimeToLiveRequest> {
+        Request::new(self.into())
+    }
+}
+
+/// Response for `leaseTimeToLive` operation.
+#[derive(Debug, Clone)]
+#[repr(transparent)]
+pub struct LeaseTimeToLiveResponse(PbLeaseTimeToLiveResponse);
+
+impl LeaseTimeToLiveResponse {
+    /// Create a new `LeaseTimeToLiveResponse` from pb lease TimeToLive response.
+    #[inline]
+    const fn new(resp: PbLeaseTimeToLiveResponse) -> Self {
+        Self(resp)
+    }
+
+    /// Get response header.
+    #[inline]
+    pub fn header(&self) -> Option<&ResponseHeader> {
+        self.0.header.as_ref().map(From::from)
+    }
+
+    /// Takes the header out of the response, leaving a [`None`] in its place.
+    #[inline]
+    pub fn take_header(&mut self) -> Option<ResponseHeader> {
+        self.0.header.take().map(ResponseHeader::new)
+    }
+
+    /// TTL is the remaining TTL in seconds for the lease; the lease will expire in under TTL+1 seconds.
+    #[inline]
+    pub const fn ttl(&self) -> i64 {
+        self.0.ttl
+    }
+
+    /// ID is the lease ID from the keep alive request.
+    #[inline]
+    pub const fn id(&self) -> i64 { self.0.id }
+
+    /// GrantedTTL is the initial granted time in seconds upon lease creation/renewal.
+    #[inline]
+    pub const fn grantedTTL(&self) -> i64 { self.0.granted_ttl }
+
+    // Keys is the list of keys attached to this lease.
+    //#[inline]
+    //pub fn keys(&self) -> &[u8] { self.0.keys.as_ref() }
+}
+
+/// Options for `leaseLeases` operation.
+#[derive(Debug, Default, Clone)]
+pub struct LeaseLeasesOptions(PbLeaseLeasesRequest);
+
+impl LeaseLeasesOptions {
+    /// Creates a `LeaseLeasesOptions`.
+    #[inline]
+    pub const fn new() -> Self {
+        Self(PbLeaseLeasesRequest {})
+    }
+}
+
+impl From<LeaseLeasesOptions> for PbLeaseLeasesRequest {
+    #[inline]
+    fn from(options: LeaseLeasesOptions) -> Self {
+        options.0
+    }
+}
+
+impl IntoRequest<PbLeaseLeasesRequest> for LeaseLeasesOptions {
+    #[inline]
+    fn into_request(self) -> Request<PbLeaseLeasesRequest> {
+        Request::new(self.into())
+    }
+}
+
+/// Response for `leaseLeases` operation.
+#[derive(Debug, Clone)]
+#[repr(transparent)]
+pub struct LeaseLeasesResponse(PbLeaseLeasesResponse);
+
+impl LeaseLeasesResponse {
+    /// Create a new `LeaseLeasesResponse` from pb lease Leases response.
+    #[inline]
+    const fn new(resp: PbLeaseLeasesResponse) -> Self {
+        Self(resp)
+    }
+
+    /// Get response header.
+    #[inline]
+    pub fn header(&self) -> Option<&ResponseHeader> {
+        self.0.header.as_ref().map(From::from)
+    }
+
+    /// Takes the header out of the response, leaving a [`None`] in its place.
+    #[inline]
+    pub fn take_header(&mut self) -> Option<ResponseHeader> {
+        self.0.header.take().map(ResponseHeader::new)
+    }
+
+    // get leases status
+    //#[inline]
+    //pub fn take_leases(&self) -> Option<LeaseStatus> {
+    //    self.0.leases.as_ref().take().map(LeaseStatus::new)
+    //}
 }
