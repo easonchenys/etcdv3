@@ -6,12 +6,14 @@ use crate::rpc::kv::{
     KvClient, PutOptions, PutResponse, Txn, TxnResponse,
 };
 use crate::rpc::watch::{WatchClient, WatchOptions, WatchStream, Watcher};
+use crate::rpc::lease::LeaseClient;
 use tonic::transport::Channel;
 
 /// Asynchronous `etcd` client using v3 API.
 pub struct Client {
     kv: KvClient,
     watch: WatchClient,
+    lease: LeaseClient,
 }
 
 impl Client {

@@ -28,6 +28,9 @@ pub enum Error {
 
     /// Utf8Error
     Utf8Error(Utf8Error),
+
+    /// Lease error
+    LeaseKeepAliveError(String),
 }
 
 impl Display for Error {
@@ -41,6 +44,7 @@ impl Display for Error {
             Error::GRPCStatus(e) => write!(f, "grep request error: {}", e),
             Error::WatchError(e) => write!(f, "watch error: {}", e),
             Error::Utf8Error(e) => write!(f, "utf8 error: {}", e),
+            Error::LeaseKeepAliveError(e) => write!(f, "lease keep alive error: {}", e),
         }
     }
 }
@@ -79,5 +83,12 @@ impl From<Utf8Error> for Error {
     #[inline]
     fn from(e: Utf8Error) -> Self {
         Error::Utf8Error(e)
+    }
+}
+
+impl From<LeaseKeepAliveError> for Error {
+    #[inline]
+    fn from(e: LeaseKeepAliveError) -> Self {
+        Error::LeaseKeepAliveError(e)
     }
 }
